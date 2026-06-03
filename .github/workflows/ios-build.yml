@@ -28,10 +28,13 @@ jobs:
         flutter pub get
 
     - name: Build IPA
-      run: flutter build ipa --no-codesign
+      run: flutter build ios --no-codesign # Utilise la commande build ios native pour maximiser la compatibilité sans signature
 
     - name: Upload IPA Artifact
       uses: actions/upload-artifact@v3
       with:
-        name: ios-ipa
-        path: build/ios/ipa/*.ipa
+        name: ios-build-output
+        path: |
+          build/ios/iphoneos/*.app
+          build/ios/ipa/*.ipa
+        if-no-files-found: error # Bloque l'action explicitement si le fichier est encore introuvable pour nous donner l'erreur exacte
