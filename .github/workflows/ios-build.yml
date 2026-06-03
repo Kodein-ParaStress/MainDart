@@ -22,21 +22,12 @@ jobs:
       with:
         channel: 'stable'
 
-    - name: Fresh Flutter Project Generation
+    - name: Prepare Project and Dependencies
       run: |
-        # 1. On crée un projet tout neuf à côté
-        cd ..
-        flutter create --project-name=cyber_app --platforms=ios fresh_project
-        
-        # 2. On remplace le main.dart par ton code stylé
-        cp $GITHUB_WORKSPACE/lib/main.dart fresh_project/lib/main.dart
-        
-        # 3. On remet tout dans le dossier de build de GitHub
-        rm -rf $GITHUB_WORKSPACE/*
-        cp -r fresh_project/* $GITHUB_WORKSPACE/
-        
-        # 4. On récupère les dépendances
+        # 1. On s'assure d'être dans le bon répertoire
         cd $GITHUB_WORKSPACE
+        
+        # 2. On télécharge les dépendances (comprenant dart_ssh2 de ton pubspec.yaml)
         flutter pub get
 
     - name: Build iOS
