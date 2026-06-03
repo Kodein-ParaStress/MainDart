@@ -9,10 +9,10 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4 # Version 4 mise à jour
 
     - name: Set up Java
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v4 # Version 4 mise à jour
       with:
         distribution: 'zulu'
         java-version: '17'
@@ -27,14 +27,13 @@ jobs:
         flutter create . --platforms=ios
         flutter pub get
 
-    - name: Build IPA
-      run: flutter build ios --no-codesign # Utilise la commande build ios native pour maximiser la compatibilité sans signature
+    - name: Build iOS
+      run: flutter build ios --no-codesign
 
-    - name: Upload IPA Artifact
-      uses: actions/upload-artifact@v3
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4 # Version 4 mise à jour
       with:
         name: ios-build-output
         path: |
           build/ios/iphoneos/*.app
           build/ios/ipa/*.ipa
-        if-no-files-found: error # Bloque l'action explicitement si le fichier est encore introuvable pour nous donner l'erreur exacte
