@@ -9,10 +9,10 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v4 # Version 4 mise à jour
+    - uses: actions/checkout@v4
 
     - name: Set up Java
-      uses: actions/setup-java@v4 # Version 4 mise à jour
+      uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
@@ -22,18 +22,24 @@ jobs:
       with:
         channel: 'stable'
 
-    - name: Pre-configure Project
+    - name: Clean and Rebuild Structure
       run: |
-        flutter create . --platforms=ios
+        # 1. Sauvegarde de ton code stylé
+        cp lib/main.dart /tmp/main.dart.bak
+        
+        # 2. Nettoyage et génération d'un VRAI projet Flutter iOS valide
+        rm -rf *
+        flutter create --project-name=cyber_app --platforms=ios .
+        
+        # 3. Restauration de ton code et configuration
+        cp /tmp/main.dart.bak lib/main.dart
         flutter pub get
 
     - name: Build iOS
       run: flutter build ios --no-codesign
 
     - name: Upload Build Artifact
-      uses: actions/upload-artifact@v4 # Version 4 mise à jour
+      uses: actions/upload-artifact@v4
       with:
         name: ios-build-output
-        path: |
-          build/ios/iphoneos/*.app
-          build/ios/ipa/*.ipa
+        path: build/ios/iphoneos/Runner.app
