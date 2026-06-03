@@ -40,7 +40,6 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // Cercles lumineux en arrière-plan pour l'effet de lueur néon
           Positioned(
             top: -100,
             left: -50,
@@ -65,16 +64,12 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
           ),
-          
-          // Contenu de la page active
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 300),
             child: _pages[_currentIndex],
           ),
         ],
       ),
-      
-      // Barre de navigation style Glassmorphism floutée
       bottomNavigationBar: Container(
         margin: const EdgeInsets.all(20),
         height: 70,
@@ -114,7 +109,6 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// --- PAGE 1 : ACCUEIL INTERACTIF ---
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -129,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _incrementCounter() {
     setState(() {
       _counter++;
-      _scale = 0.85; // Effet d'enfoncement
+      _scale = 0.85;
     });
     Future.delayed(const Duration(milliseconds: 100), () {
       setState(() => _scale = 1.0);
@@ -149,7 +143,7 @@ class _HomeScreenState extends State<HomeScreen> {
               'PROJET NEXUS',
               style: TextStyle(
                 fontSize: 28,
-                fontWeight: FontWeight.black,
+                fontWeight: FontWeight.w900, // FIX ICI
                 letterSpacing: 2,
                 color: Color(0xFF00FFCC),
                 shadows: [Shadow(color: Color(0xFF00FFCC), blurRadius: 12)],
@@ -160,8 +154,6 @@ class _HomeScreenState extends State<HomeScreen> {
               style: TextStyle(color: Colors.white60, fontSize: 14),
             ),
             const Spacer(),
-            
-            // Carte principale avec effet miroir / Glassmorphism
             Center(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(30),
@@ -200,8 +192,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const Spacer(),
-            
-            // Bouton principal animé
             Center(
               child: AnimatedScale(
                 scale: _scale,
@@ -235,7 +225,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// --- PAGE 2 : STATS / APERÇU DE LISTE SYSTÈME ---
 class StatsScreen extends StatelessWidget {
   const StatsScreen({super.key});
 
@@ -256,11 +245,9 @@ class StatsScreen extends StatelessWidget {
             const SizedBox(height: 20),
             const Text(
               'MONITEUR',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.black, letterSpacing: 2),
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: 2), // FIX ICI
             ),
             const SizedBox(height: 25),
-            
-            // Génération de la liste animée de modules
             Expanded(
               child: ListView.builder(
                 itemCount: modules.length,
