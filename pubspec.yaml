@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
-  dart_ssh2: ^2.0.0
+  dart_ssh_2: ^2.3.4
 
 dev_dependencies:
   flutter_test:
