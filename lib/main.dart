@@ -1,274 +1,281 @@
-import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:dart_ssh2/dart_ssh2.dart';
 
 void main() {
-  runApp(const NetScannerApp());
+  runApp(const CyberSSHApp());
 }
 
-class NetScannerApp extends StatelessWidget {
-  const NetScannerApp({super.key});
+class CyberSSHApp extends StatelessWidget {
+  const CyberSSHApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF090D16),
+        scaffoldBackgroundColor: const Color(0xFF070A12),
+        primaryColor: const Color(0xFF00FFCC),
       ),
-      home: const ScannerScreen(),
+      home: const MainDashboard(),
     );
   }
 }
 
-class ScannerScreen extends StatefulWidget {
-  const ScannerScreen({super.key});
+// Modèle de données pour les serveurs sauvegardés
+class SSHPreset {
+  final String name;
+  final String host;
+  final int port;
+  final String username;
+  final String password;
 
-  @override
-  State<ScannerScreen> createState() => _ScannerScreenState();
+  SSHPreset({
+    required this.name,
+    required this.host,
+    required this.port,
+    required this.username,
+    required this.password,
+  });
 }
 
-class _ScannerScreenState extends State<ScannerScreen> with SingleTickerProviderStateMixin {
-  final TextEditingController _subnetController = TextEditingController(text: '192.168.1');
-  final List<Map<String, dynamic>> _discoveredDevices = [];
-  
-  bool _isScanning = false;
-  double _progress = 0.0;
-  String _currentScanningIP = '';
-  
-  late AnimationController _radarController;
-
-  // Liste des ports standards à tester sur chaque machine détectée
-  final List<int> _commonPorts = [21, 22, 23, 80, 443, 445, 3000, 5000, 5500, 1234, 12345, 6767, 8080];
+class MainDashboard extends StatefulWidget {
+  const MainDashboard({super.key});
 
   @override
-  void initState() {
-    super.initState();
-    _radarController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    );
-  }
+  State<MainDashboard> createState() => _MainDashboardState();
+}
 
-  @override
-  void dispose() {
-    _subnetController.dispose();
-    _radarController.dispose();
-    super.dispose();
-  }
+class _MainDashboardState extends State<MainDashboard> {
+  int _selectedTab = 0;
+  
+  // Liste de presets en mémoire (Modulaire)
+  final List<SSHPreset> _presets = [
+    SSHPreset(name: 'VPS-Main-Server', host: '192.168.1.50', port: 22, username: 'root', password: 'password123'),
+  ];
 
-  // Fonction principale de scan asynchrone
-  Future<void> _startNetworkScan() async {
+  // Commandes rapides pré-enregistrées
+  final List<String> _quickCommands = [
+    'ls -la',
+    'top -b -n 1',
+    'netstat -tuln',
+    'python3 --version',
+  ];
+
+  // Variables pour la session active
+  SSHClient? _client;
+  SSHSession? _session;
+  final List<String> _terminalLogs = ['[SYSTEM] Console prête. En attente de connexion...'];
+  final TextEditingController _cmdController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
+  bool _isConnected = false;
+
+  // Connexion SSH
+  Future<void> _connectToSSH(SSHPreset preset) async {
     setState(() {
-      _isScanning = true;
-      _discoveredDevices.clear();
-      _progress = 0.0;
+      _terminalLogs.add('[CONNECTING] Liaison vers ${preset.host}:${preset.port}...');
+      _selectedTab = 1; // Basculer sur l'onglet Terminal
     });
-    _radarController.repeat();
 
-    String subnet = _subnetController.text.trim();
-    int totalHosts = 50; // Limité à 50 pour éviter les timeouts trop longs en arrière-plan
+    try {
+      final socket = await SSHSocket.connect(preset.host, preset.port, timeout: const Duration(seconds: 10));
+      final client = SSHClient(
+        socket,
+        username: preset.username,
+        onPasswordRequest: () => preset.password,
+      );
 
-    for (int i = 1; i <= totalHosts; i++) {
-      if (!_isScanning) break;
+      // Attente de l'authentification
+      await client.authenticated;
+      final session = await client.shell();
 
-      String targetIP = '$subnet.$i';
       setState(() {
-        _currentScanningIP = targetIP;
-        _progress = i / totalHosts;
+        _client = client;
+        _session = session;
+        _isConnected = true;
+        _terminalLogs.add('[SUCCESS] Authentification réussie. Shell actif.\n');
       });
 
-      try {
-        // Tente une connexion ping/socket rapide (timeout court de 150ms pour rester fluide)
-        final socket = await Socket.connect(targetIP, 80, timeout: const Duration(milliseconds: 150));
-        socket.destroy();
-        await _registerDevice(targetIP);
-      } catch (_) {
-        // Si le port 80 ne répond pas, on teste le port 443 ou 22 pour confirmer la présence de la machine
-        try {
-          final socket = await Socket.connect(targetIP, 443, timeout: const Duration(milliseconds: 150));
-          socket.destroy();
-          await _registerDevice(targetIP);
-        } catch (_) {
-          // Machine non détectée ou hors ligne
-        }
+      // Écoute des paquets de retour du serveur
+      session.stdout.transform(utf8.decoder).listen((data) {
+        setState(() {
+          _terminalLogs.add(data);
+        });
+        _scrollToBottom();
+      });
+
+      session.stderr.transform(utf8.decoder).listen((data) {
+        setState(() {
+          _terminalLogs.add('[ERROR] $data');
+        });
+        _scrollToBottom();
+      });
+
+    } catch (e) {
+      setState(() {
+        _terminalLogs.add('[FAIL] Erreur de connexion: $e');
+      });
+    }
+  }
+
+  // Envoi d'une commande au serveur
+  void _sendCommand(String cmd) {
+    if (_session == null || !_isConnected) return;
+    if (cmd.trim().isEmpty) return;
+
+    _session!.write(utf8.encode('$cmd\n') as Uint8List);
+    _cmdController.clear();
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
       }
-    }
-
-    setState(() {
-      _isScanning = false;
-      _currentScanningIP = 'Scan terminé';
     });
-    _radarController.stop();
-  }
-
-  // Si une machine répond, on scanne ses ports ouverts principaux
-  Future<void> _registerDevice(String ip) async {
-    List<int> openPorts = [];
-    
-    for (int port in _commonPorts) {
-      try {
-        final socket = await Socket.connect(ip, port, timeout: const Duration(milliseconds: 100));
-        openPorts.add(port);
-        socket.destroy();
-      } catch (_) {}
-    }
-
-    setState(() {
-      _discoveredDevices.add({
-        'ip': ip,
-        'ports': openPorts.isEmpty ? ['Aucun port standard détecté'] : openPorts.map((p) => '$p').toList(),
-      });
-    });
-  }
-
-  void _stopScan() {
-    setState(() {
-      _isScanning = false;
-      _currentScanningIP = 'Scan interrompu';
-    });
-    _radarController.stop();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('NET SCANNER v1.0', style: TextStyle(fontFamily: 'Courier', letterSpacing: 2, color: Color(0xFF00FFCC))),
-        backgroundColor: const Color(0xFF0F172A),
-        elevation: 0,
+        title: const Text('PARADOX SSH', style: TextStyle(fontFamily: 'Courier', letterSpacing: 2, fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xFF0F1424),
         actions: [
-          if (_isScanning)
-            IconButton(
-              icon: const Icon(Icons.stop, color: Colors.redAccent),
-              onPressed: _stopScan,
-            )
+          Container(
+            margin: const EdgeInsets.only(right: 15),
+            child: CircleAvatar(
+              radius: 6,
+              backgroundColor: _isConnected ? const Color(0xFF00FF66) : Colors.redAccent,
+            ),
+          )
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Configuration du sous-réseau
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.03),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF00FFCC).withOpacity(0.2)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.router, color: Color(0xFF00FFCC)),
-                  const SizedBox(width: 15),
-                  const Text('Plage : ', style: TextStyle(color: Colors.white60)),
-                  Expanded(
-                    child: TextField(
-                      controller: _subnetController,
-                      style: const TextStyle(fontFamily: 'Courier', fontSize: 18),
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        hintText: '192.168.1',
-                      ),
-                      keyboardType: TextInputType.number,
-                      enabled: !_isScanning,
-                    ),
-                  ),
-                  const Text('.X (1-50)', style: TextStyle(color: Colors.white38, fontSize: 12)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Bouton de déclenchement
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton.icon(
-                onPressed: _isScanning ? null : _startNetworkScan,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF00FFCC),
-                  foregroundColor: const Color(0xFF090D16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  disabledBackgroundColor: Colors.white10,
-                ),
-                icon: _isScanning 
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white30))
-                  : const Icon(Icons.radar),
-                label: Text(_isScanning ? 'RECHERCHE EN COURS...' : 'LANCER LE SCAN LAN', style: const TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Statut et barre de progression
-            if (_isScanning || _currentScanningIP.isNotEmpty) ...[
-              Text('Analyse : $_currentScanningIP', style: const TextStyle(fontFamily: 'Courier', color: Colors.white70)),
-              const SizedBox(height: 8),
-              LinearProgressIndicator(
-                value: _progress,
-                backgroundColor: Colors.white10,
-                color: const Color(0xFF00FFCC),
-                minHeight: 4,
-              ),
-              const SizedBox(height: 20),
-            ],
-
-            const Text('APPAREILS DÉTECTÉS', style: TextStyle(fontSize: 14, letterSpacing: 1.5, color: Colors.white38, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-
-            // Liste des résultats
-            Expanded(
-              child: _discoveredDevices.isEmpty
-                  ? Center(
-                      child: Text(
-                        _isScanning ? 'Écoute du réseau...' : 'Aucun appareil détecté.\nLance un scan.',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white38, fontFamily: 'Courier'),
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: _discoveredDevices.length,
-                      itemBuilder: (context, index) {
-                        final device = _discoveredDevices[index];
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          padding: const EdgeInsets.all(15),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.02),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFF00FF66).withOpacity(0.3)),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.devices, color: Color(0xFF00FF66), size: 30),
-                              const SizedBox(width: 15),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      device['ip'],
-                                      style: const TextStyle(fontSize: 18, fontFamily: 'Courier', fontWeight: FontWeight.bold, color: Colors.white),
-                                    ),
-                                    const SizedBox(height: 5),
-                                    Text(
-                                      'Ports ouverts : ${device['ports'].join(', ')}',
-                                      style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.6), fontFamily: 'Courier'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
+      body: _selectedTab == 0 ? _buildPresetsTab() : _buildTerminalTab(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedTab,
+        backgroundColor: const Color(0xFF0F1424),
+        selectedItemColor: const Color(0xFF00FFCC),
+        unselectedItemColor: Colors.white38,
+        onTap: (index) => setState(() => _selectedTab = index),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.dns), label: 'Presets'),
+          BottomNavigationBarItem(icon: Icon(Icons.terminal), label: 'Terminal'),
+        ],
       ),
+    );
+  }
+
+  // ONGLET 1 : Liste des Serveurs et Configuration
+  Widget _buildPresetsTab() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(20),
+      itemCount: _presets.length,
+      itemBuilder: (context, index) {
+        final item = _presets[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 15),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.02),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF00FFCC).withOpacity(0.15)),
+          ),
+          child: ListTile(
+            contentPadding: const EdgeInsets.all(15),
+            leading: const Icon(Icons.terminal, color: Color(0xFF00FFCC), size: 35),
+            title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            subtitle: Text('${item.username}@${item.host}:${item.port}', style: const TextStyle(fontFamily: 'Courier', color: Colors.white54)),
+            trailing: const Icon(Icons.bolt, color: Color(0xFF00FF66)),
+            onTap: () => _connectToSSH(item),
+          ),
+        );
+      },
+    );
+  }
+
+  // ONGLET 2 : Console et Boutons Modulaires
+  Widget _buildTerminalTab() {
+    return Column(
+      children: [
+        // Zone d'affichage des logs du terminal
+        Expanded(
+          child: Container(
+            width: double.infinity,
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF020408),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withOpacity(0.05)),
+            ),
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              child: Text(
+                _terminalLogs.join('\n'),
+                style: const TextStyle(fontFamily: 'Courier', fontSize: 13, color: Color(0xFF00FF66)),
+              ),
+            ),
+          ),
+        ),
+
+        // BARRE MODULAIRE : Commandes rapides pré-enregistrées
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          child: Row(
+            children: _quickCommands.map((cmd) {
+              return Container(
+                margin: const EdgeInsets.only(right: 8),
+                child: ActionChip(
+                  backgroundColor: const Color(0xFF1E293B),
+                  side: BorderSide(color: const Color(0xFF00FFCC).withOpacity(0.3)),
+                  label: Text(cmd, style: const TextStyle(fontFamily: 'Courier', color: Colors.white)),
+                  onPressed: () => _sendCommand(cmd),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+
+        // Champ d'entrée de commandes
+        Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.03),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                  ),
+                  child: TextField(
+                    controller: _cmdController,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    style: const TextStyle(fontFamily: 'Courier', color: Colors.white),
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      hintText: 'Exécuter une commande...',
+                      hintStyle: TextStyle(color: Colors.white24),
+                    ),
+                    onSubmitted: _sendCommand,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.send, color: Color(0xFF00FFCC)),
+                onPressed: () => _sendCommand(_cmdController.text),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
