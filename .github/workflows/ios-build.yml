@@ -22,21 +22,27 @@ jobs:
       with:
         channel: 'stable'
 
-    - name: Clean and Rebuild Structure
+    - name: Fresh Flutter Project Generation
       run: |
-        # 1. Sauvegarde de ton code stylé
-        cp lib/main.dart /tmp/main.dart.bak
+        # 1. On crée un projet tout neuf à côté
+        cd ..
+        flutter create --project-name=cyber_app --platforms=ios fresh_project
         
-        # 2. Nettoyage et génération d'un VRAI projet Flutter iOS valide
-        rm -rf *
-        flutter create --project-name=cyber_app --platforms=ios .
+        # 2. On remplace le main.dart par ton code stylé
+        cp $GITHUB_WORKSPACE/lib/main.dart fresh_project/lib/main.dart
         
-        # 3. Restauration de ton code et configuration
-        cp /tmp/main.dart.bak lib/main.dart
+        # 3. On remet tout dans le dossier de build de GitHub
+        rm -rf $GITHUB_WORKSPACE/*
+        cp -r fresh_project/* $GITHUB_WORKSPACE/
+        
+        # 4. On récupère les dépendances
+        cd $GITHUB_WORKSPACE
         flutter pub get
 
     - name: Build iOS
-      run: flutter build ios --no-codesign
+      run: |
+        cd $GITHUB_WORKSPACE
+        flutter build ios --no-codesign --verbose
 
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
